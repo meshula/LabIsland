@@ -1,0 +1,7 @@
+{
+  "vocab_file": "/Users/nporcino/.cache/huggingface/hub/models--google--t5-efficient-tiny/snapshots/3441d7e8bf3f89841f366d39452b95200416e4a9/spiece.model",
+  "model_max_length": 1000000000000000019884624838656,
+  "pad_token": "<pad>",
+  "eos_token": "</s>",
+  "unk_token": "<unk>"
+}
