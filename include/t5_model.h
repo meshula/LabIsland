@@ -34,8 +34,7 @@ private:
     static constexpr size_t max_sequence_length_ = 64;  // Reduced to avoid memory issues
     static constexpr size_t batch_size_ = 1;
     static constexpr size_t min_tokens_ = 1;
-    static constexpr size_t max_tokens_ = 32768;  // Typical vocab size limit
-
+    
     // Special token IDs
     int pad_token_id_;
     int eos_token_id_;

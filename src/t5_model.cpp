@@ -5,8 +5,11 @@
 #include <filesystem>
 
 bool T5Model::isValidTokenId(int64_t id) const {
-    return id >= 0 && id < static_cast<int64_t>(tokenizer_->GetPieceSize()) && 
-           id < static_cast<int64_t>(max_tokens_);
+    auto vocab_size = tokenizer_->GetPieceSize();
+    if (debug_mode_ && (id < 0 || id >= static_cast<int64_t>(vocab_size))) {
+        std::cout << "Invalid token ID " << id << " (valid range: 0 to " << (vocab_size - 1) << ")" << std::endl;
+    }
+    return id >= 0 && id < static_cast<int64_t>(vocab_size);
 }
 
 T5Model::T5Model(const std::string& model_path) {
@@ -151,8 +154,8 @@ std::string T5Model::generate(const std::string& input_text, size_t max_length) 
             std::cout << "]" << std::endl;
         }
 
-        // Safely get output data
-        const int64_t* output_data = output_tensors[0].GetTensorData<int64_t>();
+        // Get output data as int32_t instead of int64_t
+        const int32_t* output_data = output_tensors[0].GetTensorData<int32_t>();
         size_t output_size = tensor_info.GetElementCount();
         
         if (debug_mode_) {
@@ -164,11 +167,12 @@ std::string T5Model::generate(const std::string& input_text, size_t max_length) 
         output_tokens.reserve(output_size);
         
         for (size_t i = 0; i < output_size; i++) {
-            int64_t token_id = output_data[i];
+            // Safely convert int32_t to int64_t
+            int64_t token_id = static_cast<int64_t>(output_data[i]);
             if (isValidTokenId(token_id)) {
                 output_tokens.push_back(token_id);
             } else if (debug_mode_) {
-                std::cout << "Skipping invalid token ID: " << token_id << std::endl;
+                std::cout << "Invalid token ID " << token_id << " at position " << i << std::endl;
             }
         }
 
