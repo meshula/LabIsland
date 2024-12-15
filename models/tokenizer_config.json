@@ -1,0 +1,7 @@
+{
+  "vocab_file": "models/spiece.model",
+  "model_max_length": 1000000000000000019884624838656,
+  "pad_token": "<pad>",
+  "eos_token": "</s>",
+  "unk_token": "<unk>"
+}

@@ -6,6 +6,18 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
 
+# Download and build SentencePiece
+FetchContent_Declare(
+    sentencepiece
+    GIT_REPOSITORY https://github.com/google/sentencepiece.git
+    GIT_TAG v0.1.99
+)
+# Disable SentencePiece tests and unnecessary components
+set(SPM_ENABLE_SHARED OFF CACHE BOOL "")
+set(SPM_ENABLE_TENSORFLOW_SHARED OFF CACHE BOOL "")
+set(SPM_BUILD_TEST OFF CACHE BOOL "")
+FetchContent_MakeAvailable(sentencepiece)
+
 # Download and extract ONNX Runtime
 set(ONNXRUNTIME_VERSION "1.20.1")
 set(ONNXRUNTIME_URL "https://github.com/microsoft/onnxruntime/releases/download/v${ONNXRUNTIME_VERSION}/onnxruntime-osx-arm64-${ONNXRUNTIME_VERSION}.tgz")
@@ -31,24 +43,24 @@ endif()
 # Find the extracted ONNX Runtime directory
 file(GLOB ONNXRUNTIME_ROOT "${ONNXRUNTIME_DOWNLOAD_DIR}/onnxruntime-osx-arm64-${ONNXRUNTIME_VERSION}")
 
-# Add ONNX Runtime include and library directories
-include_directories("${ONNXRUNTIME_ROOT}/include")
-link_directories("${ONNXRUNTIME_ROOT}/lib")
-
 # Add executable
 add_executable(island_npc 
     src/main.cpp
     src/npc.cpp
+    src/t5_model.cpp
 )
 
 # Include directories
 target_include_directories(island_npc PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${ONNXRUNTIME_ROOT}/include
+    ${sentencepiece_SOURCE_DIR}/src    # Add SentencePiece headers
 )
 
-# Link against ONNX Runtime
+# Link against ONNX Runtime and SentencePiece
 target_link_libraries(island_npc PRIVATE
-    onnxruntime
+    ${ONNXRUNTIME_ROOT}/lib/libonnxruntime.dylib
+    sentencepiece-static    # Use static library
 )
 
 # Copy ONNX model and tokenizer config to build directory
