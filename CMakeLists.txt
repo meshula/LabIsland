@@ -46,7 +46,7 @@ file(GLOB ONNXRUNTIME_ROOT "${ONNXRUNTIME_DOWNLOAD_DIR}/onnxruntime-osx-arm64-${
 # Add executable
 add_executable(island_npc 
     src/main.cpp
-    src/npc.cpp
+    src/tokenizer.cpp
     src/t5_model.cpp
 )
 
