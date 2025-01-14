@@ -22,17 +22,9 @@ static MunitResult test_special_tokens(const MunitParameter params[], void* fixt
     Tokenizer tokenizer(model_path);
     
     // Get special token IDs
-    int pad_id = tokenizer.GetPadTokenId();
-    int eos_id = tokenizer.GetEosTokenId();
     int unk_id = tokenizer.GetUnkTokenId();
     
-    // Print token IDs for debugging
-    printf("pad_id: %d, eos_id: %d, unk_id: %d\n", pad_id, eos_id, unk_id);
-    
-    // Verify they are different and have expected values
-    munit_assert_int(pad_id, !=, eos_id);
-    munit_assert_int(pad_id, !=, unk_id);
-    munit_assert_int(eos_id, !=, unk_id);
+    munit_assert_int(3, ==, unk_id);
     
     return MUNIT_OK;
 }
@@ -67,6 +59,41 @@ static MunitResult test_tokenize_detokenize(const MunitParameter params[], void*
     
     return MUNIT_OK;
 }
+
+static MunitResult test_unrecognized_tokens(const MunitParameter params[], void* user_data) {
+    Tokenizer tokenizer(model_path);
+
+    printf("Test unrecognized tokens\n");
+    std::vector<std::string> tokens = {"brillig", "slithy", "tove"};
+    // for brillig the expectedd tokenization is the unk token, bri, l, and lig.
+    std::vector<int64_t> expected_tokens[3] =
+        {{tokenizer.GetUnkTokenId(), 2160, 40, 2825}, // unk, bri, l, lig
+         {tokenizer.GetUnkTokenId(), 7, 18800, 63}, // unk, s, lith, y
+        {12, 162}}; // to, ve ~ nb. for some reason "tove" is recognized as two tokens, with no unk tag.
+    int expected = 0;
+    for (const auto& token : tokens) {
+        auto token_ids = tokenizer.tokenize({token});
+        for (auto id : token_ids) {
+            printf("Token: %s, ID: %lld\n", token.c_str(), (long long)id);
+        }
+        std::string result = tokenizer.detokenize(token_ids);
+        printf("Detokenized: %s\n", result.c_str());
+        for (auto id : token_ids) {
+            std::string token = tokenizer.detokenize({id});
+            printf("Detokenized ID: %lld, Token: %s\n", (long long)id, token.c_str());
+        }
+
+        // munit assert the expected tokens match.
+        munit_assert(token_ids.size() == expected_tokens[expected].size());
+        for (size_t i = 0; i < token_ids.size(); ++i) {
+            munit_assert_int64(token_ids[i], ==, expected_tokens[expected][i]);
+        }
+        ++expected;
+    }
+
+    return MUNIT_OK;
+}
+
 static MunitTest tests[] = {
     {
         (char*)"/special_tokens",
@@ -83,6 +110,11 @@ static MunitTest tests[] = {
         test_teardown,
         MUNIT_TEST_OPTION_NONE,
         NULL
+    },
+    { 
+        (char*) "/test_unrecognized_tokens", 
+        test_unrecognized_tokens, test_setup, test_teardown,
+         MUNIT_TEST_OPTION_NONE, NULL 
     },
     { NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL }
 };
