@@ -6,6 +6,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(FetchContent)
 
+# Download and build µnit
+FetchContent_Declare(
+    munit
+    GIT_REPOSITORY https://github.com/nemequ/munit.git
+    GIT_TAG master
+)
+FetchContent_GetProperties(munit)
+if(NOT munit_POPULATED)
+    FetchContent_Populate(munit)
+    
+    # Create munit library
+    add_library(munit STATIC
+        ${munit_SOURCE_DIR}/munit.c
+    )
+    target_include_directories(munit PUBLIC ${munit_SOURCE_DIR})
+endif()
+
 # Download and build SentencePiece
 FetchContent_Declare(
     sentencepiece
@@ -46,7 +63,9 @@ file(GLOB ONNXRUNTIME_ROOT "${ONNXRUNTIME_DOWNLOAD_DIR}/onnxruntime-osx-arm64-${
 # Add executable
 add_executable(island_npc 
     src/main.cpp
+    src/tokenizer.h
     src/tokenizer.cpp
+    src/t5_model.h
     src/t5_model.cpp
 )
 
@@ -67,3 +86,35 @@ target_link_libraries(island_npc PRIVATE
 file(COPY ${CMAKE_SOURCE_DIR}/models
      DESTINATION ${CMAKE_BINARY_DIR}
      PATTERN "*")
+
+# Add test executable
+add_executable(tokenizer_test
+    tests/tokenizer_test.cpp
+    src/tokenizer.h
+    src/tokenizer.cpp
+)
+
+target_include_directories(tokenizer_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${munit_SOURCE_DIR}/
+    ${sentencepiece_SOURCE_DIR}/src
+)
+
+# Copy munit header to build directory
+configure_file(
+    ${munit_SOURCE_DIR}/munit.h
+    ${CMAKE_BINARY_DIR}/munit.h
+    COPYONLY
+)
+
+target_include_directories(tokenizer_test PRIVATE
+    ${CMAKE_BINARY_DIR}
+)
+
+target_link_libraries(tokenizer_test PRIVATE
+    munit
+    sentencepiece-static
+)
+
+enable_testing()
+add_test(NAME tokenizer_test COMMAND tokenizer_test)

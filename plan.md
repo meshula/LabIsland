@@ -2,89 +2,17 @@
 
 This project creates a game NPC with memory of conversations, actions (location visits, item acquisitions, conversations), and self-monitoring of essential needs using a T5 model for natural language interaction.
 
-## Phase 1: Model Setup ✓
-1. Convert T5-tiny model to ONNX format ✓
-   - Script: scripts/convert_t5_to_onnx.py
-   - Output: models/t5_tiny.onnx
-2. Setup ONNX Runtime integration in C++ ✓
-   - Implementation: t5_model.h/cpp
-   - Basic model loading and inference structure
+Meta prompt:
 
-## Phase 2: Text Processing (Current Phase)
-1. Implement tokenization/detokenization
-   - [x] Copy SentencePiece model file to project
-   - [x] Implement SentencePiece integration in T5Model
-   - [x] Complete tokenize() method in t5_model.cpp
-   - [x] Complete detokenize() method in t5_model.cpp
-   - [x] Add debug mode to control token inspection output
-   - [x] Fix token handling issues:
-     - [x] Added token validation with isValidTokenId method
-     - [x] Reduced sequence lengths to prevent memory issues
-     - [x] Added proper bounds checking against vocabulary size
-     - [x] Improved error handling for decoder failures
-   - [ ] Test text generation with fixed token handling:
-     - [ ] Test with simple inputs
-     - [ ] Test with longer context
-     - [ ] Verify token sequences are valid
-     - [ ] Check model output quality
-2. Test text generation
-   - [ ] Create basic test cases:
-     - [ ] Simple greetings
-     - [ ] Basic conversations
-     - [ ] Context-aware responses
-   - [ ] Verify model outputs:
-     - [ ] Check response coherence
-     - [ ] Validate context handling
-     - [ ] Test memory integration
+Address the TODO's in order, one at a time.
+Addressing a TODO means to implement it, write a corresponding unit test, run the unit test and debug and edit until the test passes. When the test passes, prompt to either git commit work since the last commit, or to refine the test further. Naturally a TODO that is to add a test does not need a test for the tst. When the test passes, mark the TODO in this file as done by filling in an X.
 
-## Phase 3: NPC Core Implementation
-1. Memory System
-   - [ ] Design memory structure for:
-     - Conversations
-     - Actions/Events
-     - Location history
-     - Item inventory
-     - Essential needs status
-2. NPC Personality
-   - [ ] Create backstory
-   - [ ] Define personality traits
-   - [ ] Implement response generation with personality context
+TODOs:
 
-## Phase 4: Interaction System
-1. REPL Interface
-   - [ ] Basic command parsing
-   - [ ] Response generation
-   - [ ] Memory integration
-2. Action System
-   - [ ] Define possible actions
-   - [ ] Implement action processing
-   - [ ] Update memory based on actions
-
-## Phase 5: Testing and Refinement
-1. System Testing
-   - [ ] Test conversation memory
-   - [ ] Test action processing
-   - [ ] Test personality consistency
-2. Performance Optimization
-   - [ ] Optimize model inference
-   - [ ] Memory management
-   - [ ] Response generation speed
-
-## Checkpoint Information
-Current Checkpoint: Phase 2.1
-- Completed: 
-  - Basic model loading and inference structure
-  - Initial tokenization implementation
-  - Added special token handling
-  - Added debug mode control
-  - Fixed token validation issues
-  - Improved memory management
-  - Added robust error handling
-- Next Steps: 
-  1. Test text generation with fixed token handling
-  2. Verify model outputs are coherent
-  3. Test with various input lengths
-  4. Move to comprehensive text generation testing
+[ ] Add a test for the tokenizer verifying that "brillig", "slithy", and "tove" are not recognized tokens.
+[ ] Add a tokenizer test that verifies the first paragraph of Jabberwocky tokenizes in accordance with the expected results of the "brillig", "slithy", and "tove" test.
+[ ] Factor t5_model to have a protected tokens to tensor function, and tensor to token function.
+[ ] Add a token to tensor test that verifies we can tokenize and tensorize the first paragraph of 1984, and then detensorize to tokens and confirm that the paragraph has been reconstructed.
 
 Dependencies:
 - ONNX Runtime
@@ -92,16 +20,6 @@ Dependencies:
 - T5-tiny model
 
 ## Debug Instructions
-To test token handling:
-1. Build the project
-2. Run with debug flag: `./island_npc --debug`
-3. Enter test inputs to see:
-   - Token validation
-   - Sequence lengths
-   - Tensor shapes
-   - Model outputs
-4. Check for:
-   - Valid token IDs
-   - Proper sequence truncation
-   - Successful detokenization
-   - Coherent responses
+To run tests:
+1. Build the project using, eg, `make`.
+2. Run with debug flag: `./[testname] -- model path/to/models/spiece.model

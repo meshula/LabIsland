@@ -19,10 +19,10 @@ T5Model::T5Model(const std::string& model_path, const std::string& sp_model_path
 
     session_ = std::make_unique<Ort::Session>(*env_, model_path.c_str(), session_options);
 
-    // Initialize special token IDs from the tokenizer
-    pad_token_id_ = tokenizer_.GetPadTokenId();
-    eos_token_id_ = tokenizer_.GetEosTokenId();
-    unk_token_id_ = tokenizer_.GetUnkTokenId();
+    // Initialize special token IDs - T5 uses fixed IDs
+    pad_token_id_ = 0;  // T5 uses 0 for pad
+    eos_token_id_ = 1;  // T5 uses 1 for </s>
+    unk_token_id_ = 2;  // T5 uses 2 for <unk>
     
     std::cerr << "Initialized with special tokens:\n"
               << "  PAD=" << pad_token_id_ << "\n"
@@ -58,13 +58,13 @@ std::string T5Model::infer(const std::string& input_text) {
 
     std::vector<int64_t> input_ids(max_sequence_length_, pad_token_id_);
     std::vector<int64_t> attention_mask(max_sequence_length_, 0);
-    // Initialize decoder input with start token (pad token for T5)
+    // Initialize decoder input with start token (T5 uses 0 as pad which also serves as start token)
     std::vector<int64_t> decoder_input_ids(max_sequence_length_, pad_token_id_);
     std::vector<int64_t> decoder_attention_mask(max_sequence_length_, 0);
-    decoder_input_ids[0] = pad_token_id_;  // Start with pad token
+    decoder_input_ids[0] = pad_token_id_;  // Start with pad token (0)
     decoder_attention_mask[0] = 1;  // Only attend to the first position
 
-    std::cerr << "Using pad token " << pad_token_id_ << " as start token for decoder input\n";
+    std::cerr << "Using pad token " << pad_token_id_ << " as start token (T5 standard)\n";
 
     // Copy tokens and set attention mask
     std::copy(tokens.begin(), tokens.end(), input_ids.begin());
@@ -110,41 +110,46 @@ std::string T5Model::infer(const std::string& input_text) {
         "decoder_input_ids", "decoder_attention_mask", nullptr};
     const char* output_node_names[] = {"output", nullptr};
 
-    auto output_tensors = session_->Run(
-        Ort::RunOptions{nullptr},
-        input_node_names,
-        input_tensors.data(),
-        input_tensors.size(),
-        output_node_names,
-        1); //output_node_names_.size());
-
-    auto& output_tensor = output_tensors.front();
-    float* logits = output_tensor.GetTensorMutableData<float>();
-    auto output_shape = output_tensor.GetTensorTypeAndShapeInfo().GetShape();
-
-    // Expected shape: [batch_size, sequence_length, vocab_size]
-    if (output_shape.size() != 3) {
-        throw std::runtime_error("Unexpected output tensor shape");
-    }
-    
-    size_t batch_size = output_shape[0];
-    size_t seq_len = output_shape[1];
-    size_t model_vocab_size = output_shape[2];
-    
-    std::cerr << "Model output shape: [" << batch_size << ", " << seq_len << ", " << model_vocab_size << "]\n";
-    if (model_vocab_size != vocab_size) {
-        std::cerr << "Warning: Model vocab size (" << model_vocab_size 
-                  << ") differs from tokenizer vocab size (" << vocab_size << ")\n";
-    }
-
-    // Process output logits one token at a time
+    // Generate tokens autoregressively (limit to reasonable length)
     std::vector<int64_t> output_tokens;
-    for (size_t i = 0; i < seq_len && output_tokens.size() < max_sequence_length_; i++) {
-        std::cerr << "Processing position " << i << " with " << output_tokens.size() << " tokens generated\n";
-        // Calculate offset for current position in batch 0
-        // For a tensor of shape [batch_size, seq_len, vocab_size], 
-        // to access element [b, s, v] we need offset = (s * batch_size * vocab_size) + (b * vocab_size) + v
-        size_t base_offset = (i * batch_size * model_vocab_size) + (0 * model_vocab_size);
+    size_t max_new_tokens = 32;  // Limit output length
+    
+    for (size_t step = 0; step < max_new_tokens; step++) {
+        auto output_tensors = session_->Run(
+            Ort::RunOptions{nullptr},
+            input_node_names,
+            input_tensors.data(),
+            input_tensors.size(),
+            output_node_names,
+            1);
+
+        auto& output_tensor = output_tensors.front();
+        float* logits = output_tensor.GetTensorMutableData<float>();
+        auto output_shape = output_tensor.GetTensorTypeAndShapeInfo().GetShape();
+
+        // Expected shape: [batch_size, sequence_length, vocab_size]
+        if (output_shape.size() != 3) {
+            throw std::runtime_error("Unexpected output tensor shape");
+        }
+        
+        size_t batch_size = output_shape[0];
+        size_t seq_len = output_shape[1];
+        size_t model_vocab_size = output_shape[2];
+        
+        if (step == 0) {
+            std::cerr << "Model output shape: [" << batch_size << ", " << seq_len << ", " << model_vocab_size << "]\n";
+            if (model_vocab_size != vocab_size) {
+                std::cerr << "Warning: Model vocab size (" << model_vocab_size 
+                        << ") differs from tokenizer vocab size (" << vocab_size << ")\n";
+            }
+        }
+
+        // Get next token prediction from the last position
+        std::cerr << "Generation step " << step << " with " << output_tokens.size() << " tokens generated\n";
+        // For output shape [batch_size=1, seq_len, vocab_size], we want the logits
+        // for the current decoder position
+        size_t current_len = output_tokens.size();
+        size_t base_offset = (current_len * model_vocab_size);  // Current position in first batch
         
         // Apply softmax and find max probability token
         float max_prob = 0.0f;
@@ -152,6 +157,13 @@ std::string T5Model::infer(const std::string& input_text) {
         float sum_exp = 0.0f;
         std::vector<float> probs(model_vocab_size);
         
+        // Debug first few logits
+        std::cerr << "First few logits at first position: ";
+        for (size_t j = 0; j < std::min(size_t(5), model_vocab_size); j++) {
+            std::cerr << logits[base_offset + j] << " ";
+        }
+        std::cerr << "\n";
+
         // First pass: compute exp and sum
         float max_logit = -std::numeric_limits<float>::infinity();
         for (size_t j = 0; j < model_vocab_size; j++) {
@@ -175,7 +187,7 @@ std::string T5Model::infer(const std::string& input_text) {
         }
 
         // Debug output
-        std::cerr << "Position " << i << ": token=" << max_idx 
+        std::cerr << "Position " << step << ": token=" << max_idx 
                   << " prob=" << max_prob 
                   << " (eos=" << eos_token_id_ 
                   << " pad=" << pad_token_id_ 
@@ -189,7 +201,41 @@ std::string T5Model::infer(const std::string& input_text) {
             break;
         }
         
+        // Add predicted token to output
         output_tokens.push_back(static_cast<int64_t>(max_idx));
+        
+        // Update decoder input for next step
+        decoder_input_ids[step + 1] = static_cast<int64_t>(max_idx);
+        decoder_attention_mask[step + 1] = 1;
+        
+        // Update input tensors with new decoder state
+        input_tensors[2] = Ort::Value::CreateTensor<int64_t>(
+            memory_info, decoder_input_ids.data(), decoder_input_ids.size(), shape.data(), shape.size());
+        input_tensors[3] = Ort::Value::CreateTensor<int64_t>(
+            memory_info, decoder_attention_mask.data(), decoder_attention_mask.size(), shape.data(), shape.size());
     }
-    return tokenizer_.detokenize(output_tokens);
+    // Debug output tokens before detokenization
+    std::cerr << "Output tokens before detokenization: ";
+    for (auto token : output_tokens) {
+        std::cerr << token << " ";
+    }
+    std::cerr << "\n";
+
+    // Map model vocab IDs to SentencePiece vocab IDs if needed
+    std::vector<int64_t> mapped_tokens;
+    for (auto token : output_tokens) {
+        // T5 model has extra tokens at the end of its vocab
+        // Only pass through tokens that are within SentencePiece's vocab range
+        if (token < static_cast<int64_t>(vocab_size)) {
+            mapped_tokens.push_back(token);
+        }
+    }
+
+    std::cerr << "Mapped tokens for detokenization: ";
+    for (auto token : mapped_tokens) {
+        std::cerr << token << " ";
+    }
+    std::cerr << "\n";
+
+    return tokenizer_.detokenize(mapped_tokens);
 }
