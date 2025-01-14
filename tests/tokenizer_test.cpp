@@ -73,6 +73,7 @@ static MunitResult test_unrecognized_tokens(const MunitParameter params[], void*
     int expected = 0;
     for (const auto& token : tokens) {
         auto token_ids = tokenizer.tokenize({token});
+        #if 0
         for (auto id : token_ids) {
             printf("Token: %s, ID: %lld\n", token.c_str(), (long long)id);
         }
@@ -82,7 +83,7 @@ static MunitResult test_unrecognized_tokens(const MunitParameter params[], void*
             std::string token = tokenizer.detokenize({id});
             printf("Detokenized ID: %lld, Token: %s\n", (long long)id, token.c_str());
         }
-
+        #endif
         // munit assert the expected tokens match.
         munit_assert(token_ids.size() == expected_tokens[expected].size());
         for (size_t i = 0; i < token_ids.size(); ++i) {
@@ -94,28 +95,71 @@ static MunitResult test_unrecognized_tokens(const MunitParameter params[], void*
     return MUNIT_OK;
 }
 
+
+static MunitResult test_jabberwocky_tokenization(const MunitParameter params[], void* user_data) {
+    Tokenizer tokenizer(model_path);
+
+    printf("Jabberwocky test\n");
+    std::string jabberwocky = "Twas brillig, and the slithy toves did gyre and gimble in the wabe.";
+    std::vector<int64_t> expected_tokens = {
+        332, // T
+        9491, // was
+        tokenizer.GetUnkTokenId(), 2160, 40, 2825, // brillig
+        6, // ,
+        11, // and
+        8, // the
+        tokenizer.GetUnkTokenId(), 7, 18800, 63, // slithy
+        12, 162, 7, // toves
+        410, // did
+        tokenizer.GetUnkTokenId(), 122, 63, 60, // gyre
+        11, // and
+        tokenizer.GetUnkTokenId(), 122, 603, 2296, // gimble
+        16, // in
+        8, // the
+        8036, 346, // wabe
+        5, // . 
+    };
+
+    std::vector<int64_t> token_ids = tokenizer.tokenize(jabberwocky);
+    std::string check_jabberwocky = tokenizer.detokenize(token_ids);
+
+    munit_assert(jabberwocky == check_jabberwocky);
+
+#if 0
+    for (auto id : token_ids) {
+        std::string token = tokenizer.detokenize({id});
+        printf("Detokenized ID: %lld, Token: %s\n", (long long)id, token.c_str());
+    }
+
+    for (size_t i = 0; i < expected_tokens.size(); ++i) {
+        printf("Expected: %lld, Actual: %lld\n", (long long)expected_tokens[i], (long long)token_ids[i]);
+        munit_assert_int64(token_ids[i], ==, expected_tokens[i]);
+    }
+#endif
+    return MUNIT_OK;
+}
+
 static MunitTest tests[] = {
-    {
-        (char*)"/special_tokens",
+    { (char*)"/special_tokens",
         test_special_tokens,
-        test_setup,
-        test_teardown,
-        MUNIT_TEST_OPTION_NONE,
-        NULL
+        test_setup, test_teardown,
+        MUNIT_TEST_OPTION_NONE, NULL
     },
-    {
-        (char*)"/tokenize_detokenize",
+    { (char*)"/tokenize_detokenize",
         test_tokenize_detokenize,
-        test_setup,
-        test_teardown,
-        MUNIT_TEST_OPTION_NONE,
-        NULL
+        test_setup, test_teardown,
+        MUNIT_TEST_OPTION_NONE, NULL
     },
-    { 
-        (char*) "/test_unrecognized_tokens", 
-        test_unrecognized_tokens, test_setup, test_teardown,
+    { (char*) "/test_unrecognized_tokens", 
+        test_unrecognized_tokens, 
+        test_setup, test_teardown,
          MUNIT_TEST_OPTION_NONE, NULL 
     },
+    { (char*) "/test_jabberwocky_tokenization", 
+       test_jabberwocky_tokenization, 
+       test_setup, test_teardown,
+       MUNIT_TEST_OPTION_NONE, NULL },
+
     { NULL, NULL, NULL, NULL, MUNIT_TEST_OPTION_NONE, NULL }
 };
 
