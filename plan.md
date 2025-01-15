@@ -12,7 +12,7 @@ TODOs:
 [X] Add a test for the tokenizer verifying that "brillig", "slithy", and "tove" are not recognized tokens.
 [X] Add a tokenizer test that verifies the first paragraph of Jabberwocky tokenizes in accordance with the expected results of the "brillig", "slithy", and "tove" test, and that we can detokenize the paragraph successfully. Since we know the tokenization, and that brillig and slithy are unk, we know that the first tokens following the the first unk are brillig, which should be follwed by an unk, and the slithy tokens, and finally the tove tokens.
 [X] Factor t5_model to have a protected tokens to tensor function, and tensor to token function.
-[ ] Add a token to tensor test that verifies we can tokenize and tensorize the first paragraph of 1984, and then detensorize to tokens and confirm that the paragraph has been reconstructed.
+[X] Add a token to tensor test that verifies we can tokenize and tensorize the first paragraph of 1984, and then detensorize to tokens and confirm that the paragraph has been reconstructed.
 
 Dependencies:
 - ONNX Runtime
