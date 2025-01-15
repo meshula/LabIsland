@@ -31,46 +31,21 @@ T5Model::T5Model(const std::string& model_path, const std::string& sp_model_path
 }
 
 
-std::string T5Model::infer(const std::string& input_text) {
-    // T5 expects a task prefix
-    std::string prefixed_input = "translate English to English: " + input_text;
-    std::vector<int64_t> tokens = tokenizer_.tokenize(prefixed_input);
-    
-    // Debug input tokens
-    std::cerr << "Input text: '" << prefixed_input << "'\n";
-    std::cerr << "Input tokens: ";
-    for (auto token : tokens) {
-        std::cerr << token << " ";
-    }
-    std::cerr << "\n";
-    if (tokens.size() < min_tokens_)
-        return "";
-    // Add EOS token to input sequence
-    tokens.push_back(eos_token_id_);
-    if (tokens.size() >= max_sequence_length_) {
-        tokens.resize(max_sequence_length_ - 1);
-        tokens.push_back(eos_token_id_);  // Ensure EOS is the last token
-    }
-
-    // Get vocabulary size from the tokenizer
-    size_t vocab_size = tokenizer_.GetVocabSize();
-    std::cerr << "Vocabulary size: " << vocab_size << "\n";
-
+std::vector<Ort::Value> T5Model::tokens_to_tensors(const std::vector<int64_t>& tokens) {
     std::vector<int64_t> input_ids(max_sequence_length_, pad_token_id_);
     std::vector<int64_t> attention_mask(max_sequence_length_, 0);
-    // Initialize decoder input with start token (T5 uses 0 as pad which also serves as start token)
     std::vector<int64_t> decoder_input_ids(max_sequence_length_, pad_token_id_);
     std::vector<int64_t> decoder_attention_mask(max_sequence_length_, 0);
-    decoder_input_ids[0] = pad_token_id_;  // Start with pad token (0)
-    decoder_attention_mask[0] = 1;  // Only attend to the first position
-
-    std::cerr << "Using pad token " << pad_token_id_ << " as start token (T5 standard)\n";
 
     // Copy tokens and set attention mask
     std::copy(tokens.begin(), tokens.end(), input_ids.begin());
     for (size_t i = 0; i < tokens.size(); i++) {
         attention_mask[i] = 1;
     }
+
+    // Initialize decoder input with start token (T5 uses pad token as start)
+    decoder_input_ids[0] = pad_token_id_;
+    decoder_attention_mask[0] = 1;
 
     // Debug input tensors
     std::cerr << "Input IDs: ";
@@ -81,19 +56,10 @@ std::string T5Model::infer(const std::string& input_text) {
     for (size_t i = 0; i < tokens.size(); i++) {
         std::cerr << attention_mask[i] << " ";
     }
-    std::cerr << "\nDecoder input IDs: ";
-    for (size_t i = 0; i < 5; i++) {  // Just show first few tokens
-        std::cerr << decoder_input_ids[i] << " ";
-    }
-    std::cerr << "\nDecoder attention mask: ";
-    for (size_t i = 0; i < 5; i++) {  // Just show first few tokens
-        std::cerr << decoder_attention_mask[i] << " ";
-    }
     std::cerr << "\n";
 
     // Create input tensor shapes
     std::vector<int64_t> shape = {1, static_cast<int64_t>(max_sequence_length_)};
-
     auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
     std::vector<Ort::Value> input_tensors;
 
@@ -106,13 +72,93 @@ std::string T5Model::infer(const std::string& input_text) {
     input_tensors.push_back(Ort::Value::CreateTensor<int64_t>(
         memory_info, decoder_attention_mask.data(), decoder_attention_mask.size(), shape.data(), shape.size()));
 
+    return input_tensors;
+}
+
+int64_t T5Model::tensor_to_next_token(const Ort::Value& output_tensor, size_t current_len) {
+    const float* logits = output_tensor.GetTensorData<float>();
+    auto output_shape = output_tensor.GetTensorTypeAndShapeInfo().GetShape();
+
+    // Expected shape: [batch_size, sequence_length, vocab_size]
+    if (output_shape.size() != 3) {
+        throw std::runtime_error("Unexpected output tensor shape");
+    }
+    
+    size_t model_vocab_size = output_shape[2];
+    size_t base_offset = (current_len * model_vocab_size);  // Current position in first batch
+    
+    // Apply softmax and find max probability token
+    float max_prob = 0.0f;
+    size_t max_idx = 0;
+    float sum_exp = 0.0f;
+    std::vector<float> probs(model_vocab_size);
+    
+    // First pass: compute exp and sum
+    float max_logit = -std::numeric_limits<float>::infinity();
+    for (size_t j = 0; j < model_vocab_size; j++) {
+        float logit = logits[base_offset + j];
+        if (logit > max_logit) max_logit = logit;
+    }
+    
+    for (size_t j = 0; j < model_vocab_size; j++) {
+        float logit = logits[base_offset + j] - max_logit;  // Subtract max for numerical stability
+        probs[j] = std::exp(logit);
+        sum_exp += probs[j];
+    }
+    
+    // Second pass: normalize and find max probability
+    for (size_t j = 0; j < model_vocab_size; j++) {
+        probs[j] /= sum_exp;
+        if (probs[j] > max_prob) {
+            max_prob = probs[j];
+            max_idx = j;
+        }
+    }
+
+    return static_cast<int64_t>(max_idx);
+}
+
+std::string T5Model::infer(const std::string& input_text) {
+    // T5 expects a task prefix
+    std::string prefixed_input = "translate English to English: " + input_text;
+    std::vector<int64_t> tokens = tokenizer_.tokenize(prefixed_input);
+    
+    // Debug input tokens
+    std::cerr << "Input text: '" << prefixed_input << "'\n";
+    std::cerr << "Input tokens: ";
+    for (auto token : tokens) {
+        std::cerr << token << " ";
+    }
+    std::cerr << "\n";
+    
+    if (tokens.size() < min_tokens_)
+        return "";
+
+    // Add EOS token to input sequence
+    tokens.push_back(eos_token_id_);
+    if (tokens.size() >= max_sequence_length_) {
+        tokens.resize(max_sequence_length_ - 1);
+        tokens.push_back(eos_token_id_);  // Ensure EOS is the last token
+    }
+
+    // Get vocabulary size from the tokenizer
+    size_t vocab_size = tokenizer_.GetVocabSize();
+    std::cerr << "Vocabulary size: " << vocab_size << "\n";
+
+    // Convert tokens to input tensors
+    auto input_tensors = tokens_to_tensors(tokens);
+    std::vector<int64_t> decoder_input_ids(max_sequence_length_, pad_token_id_);
+    std::vector<int64_t> decoder_attention_mask(max_sequence_length_, 0);
+    decoder_input_ids[0] = pad_token_id_;
+    decoder_attention_mask[0] = 1;
+
     const char* input_node_names[] = {"input_ids", "attention_mask",
         "decoder_input_ids", "decoder_attention_mask", nullptr};
     const char* output_node_names[] = {"output", nullptr};
 
-    // Generate tokens autoregressively (limit to reasonable length)
+    // Generate tokens autoregressively
     std::vector<int64_t> output_tokens;
-    size_t max_new_tokens = 32;  // Limit output length
+    size_t max_new_tokens = 32;
     
     for (size_t step = 0; step < max_new_tokens; step++) {
         auto output_tensors = session_->Run(
@@ -124,118 +170,37 @@ std::string T5Model::infer(const std::string& input_text) {
             1);
 
         auto& output_tensor = output_tensors.front();
-        float* logits = output_tensor.GetTensorMutableData<float>();
-        auto output_shape = output_tensor.GetTensorTypeAndShapeInfo().GetShape();
-
-        // Expected shape: [batch_size, sequence_length, vocab_size]
-        if (output_shape.size() != 3) {
-            throw std::runtime_error("Unexpected output tensor shape");
-        }
-        
-        size_t batch_size = output_shape[0];
-        size_t seq_len = output_shape[1];
-        size_t model_vocab_size = output_shape[2];
-        
-        if (step == 0) {
-            std::cerr << "Model output shape: [" << batch_size << ", " << seq_len << ", " << model_vocab_size << "]\n";
-            if (model_vocab_size != vocab_size) {
-                std::cerr << "Warning: Model vocab size (" << model_vocab_size 
-                        << ") differs from tokenizer vocab size (" << vocab_size << ")\n";
-            }
-        }
-
-        // Get next token prediction from the last position
-        std::cerr << "Generation step " << step << " with " << output_tokens.size() << " tokens generated\n";
-        // For output shape [batch_size=1, seq_len, vocab_size], we want the logits
-        // for the current decoder position
-        size_t current_len = output_tokens.size();
-        size_t base_offset = (current_len * model_vocab_size);  // Current position in first batch
-        
-        // Apply softmax and find max probability token
-        float max_prob = 0.0f;
-        size_t max_idx = 0;
-        float sum_exp = 0.0f;
-        std::vector<float> probs(model_vocab_size);
-        
-        // Debug first few logits
-        std::cerr << "First few logits at first position: ";
-        for (size_t j = 0; j < std::min(size_t(5), model_vocab_size); j++) {
-            std::cerr << logits[base_offset + j] << " ";
-        }
-        std::cerr << "\n";
-
-        // First pass: compute exp and sum
-        float max_logit = -std::numeric_limits<float>::infinity();
-        for (size_t j = 0; j < model_vocab_size; j++) {
-            float logit = logits[base_offset + j];
-            if (logit > max_logit) max_logit = logit;
-        }
-        
-        for (size_t j = 0; j < model_vocab_size; j++) {
-            float logit = logits[base_offset + j] - max_logit;  // Subtract max for numerical stability
-            probs[j] = std::exp(logit);
-            sum_exp += probs[j];
-        }
-        
-        // Second pass: normalize and find max probability
-        for (size_t j = 0; j < model_vocab_size; j++) {
-            probs[j] /= sum_exp;
-            if (probs[j] > max_prob) {
-                max_prob = probs[j];
-                max_idx = j;
-            }
-        }
-
-        // Debug output
-        std::cerr << "Position " << step << ": token=" << max_idx 
-                  << " prob=" << max_prob 
-                  << " (eos=" << eos_token_id_ 
-                  << " pad=" << pad_token_id_ 
-                  << " base_offset=" << base_offset
-                  << " shape=" << output_shape[0] << "," << output_shape[1] << "," << output_shape[2]
-                  << ")\n";
+        int64_t next_token = tensor_to_next_token(output_tensor, output_tokens.size());
         
         // Stop at EOS token
-        if (max_idx == static_cast<size_t>(eos_token_id_)) {
+        if (next_token == eos_token_id_) {
             std::cerr << "Found EOS token\n";
             break;
         }
         
         // Add predicted token to output
-        output_tokens.push_back(static_cast<int64_t>(max_idx));
+        output_tokens.push_back(next_token);
         
         // Update decoder input for next step
-        decoder_input_ids[step + 1] = static_cast<int64_t>(max_idx);
+        decoder_input_ids[step + 1] = next_token;
         decoder_attention_mask[step + 1] = 1;
         
         // Update input tensors with new decoder state
+        std::vector<int64_t> shape = {1, static_cast<int64_t>(max_sequence_length_)};
+        auto memory_info = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
         input_tensors[2] = Ort::Value::CreateTensor<int64_t>(
             memory_info, decoder_input_ids.data(), decoder_input_ids.size(), shape.data(), shape.size());
         input_tensors[3] = Ort::Value::CreateTensor<int64_t>(
             memory_info, decoder_attention_mask.data(), decoder_attention_mask.size(), shape.data(), shape.size());
     }
-    // Debug output tokens before detokenization
-    std::cerr << "Output tokens before detokenization: ";
-    for (auto token : output_tokens) {
-        std::cerr << token << " ";
-    }
-    std::cerr << "\n";
 
     // Map model vocab IDs to SentencePiece vocab IDs if needed
     std::vector<int64_t> mapped_tokens;
     for (auto token : output_tokens) {
-        // T5 model has extra tokens at the end of its vocab
-        // Only pass through tokens that are within SentencePiece's vocab range
         if (token < static_cast<int64_t>(vocab_size)) {
             mapped_tokens.push_back(token);
         }
     }
-
-    std::cerr << "Mapped tokens for detokenization: ";
-    for (auto token : mapped_tokens) {
-        std::cerr << token << " ";
-    }
-    std::cerr << "\n";
 
     return tokenizer_.detokenize(mapped_tokens);
 }

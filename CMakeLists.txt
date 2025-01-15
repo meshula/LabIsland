@@ -87,18 +87,34 @@ file(COPY ${CMAKE_SOURCE_DIR}/models
      DESTINATION ${CMAKE_BINARY_DIR}
      PATTERN "*")
 
-# Add test executable
+# Add test executables
 add_executable(tokenizer_test
     tests/tokenizer_test.cpp
     src/tokenizer.h
     src/tokenizer.cpp
 )
 
-target_include_directories(tokenizer_test PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${munit_SOURCE_DIR}/
-    ${sentencepiece_SOURCE_DIR}/src
+add_executable(t5_model_test
+    tests/t5_model_test.cpp
+    src/t5_model.h
+    src/t5_model.cpp
+    src/tokenizer.h
+    src/tokenizer.cpp
 )
+
+# Configure test includes
+foreach(test_target tokenizer_test t5_model_test)
+    target_include_directories(${test_target} PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${munit_SOURCE_DIR}/
+        ${sentencepiece_SOURCE_DIR}/src
+        ${ONNXRUNTIME_ROOT}/include
+    )
+
+    target_include_directories(${test_target} PRIVATE
+        ${CMAKE_BINARY_DIR}
+    )
+endforeach()
 
 # Copy munit header to build directory
 configure_file(
@@ -107,14 +123,18 @@ configure_file(
     COPYONLY
 )
 
-target_include_directories(tokenizer_test PRIVATE
-    ${CMAKE_BINARY_DIR}
-)
-
+# Link test dependencies
 target_link_libraries(tokenizer_test PRIVATE
     munit
     sentencepiece-static
 )
 
+target_link_libraries(t5_model_test PRIVATE
+    munit
+    sentencepiece-static
+    ${ONNXRUNTIME_ROOT}/lib/libonnxruntime.dylib
+)
+
 enable_testing()
 add_test(NAME tokenizer_test COMMAND tokenizer_test)
+add_test(NAME t5_model_test COMMAND t5_model_test --model ${CMAKE_BINARY_DIR}/models/t5_tiny.onnx --sp_model ${CMAKE_BINARY_DIR}/models/spiece.model)
